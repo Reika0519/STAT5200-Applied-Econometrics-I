@@ -177,73 +177,88 @@ ic2012ay <- read.csv("/Users/RekaFujii4/Desktop/Replication files/Predictor vari
 ic2013ay <- read.csv("/Users/RekaFujii4/Desktop/Replication files/Predictor variables — Admissions, costs, and institutional finance/Institutional Charactoristics /ic2013_ay.csv")
 ic2014ay <- read.csv("/Users/RekaFujii4/Desktop/Replication files/Predictor variables — Admissions, costs, and institutional finance/Institutional Charactoristics /ic2014_ay.csv")
 
-
-#View(ic2004ay)
-head(ic2004ay$CINSON)
 years <- 2004:2014
-#price_vars <- c("CHG2AY3", "CHG4AY3", "CHG5AY3", "CHG6AY3")
-
-
 # Combine datasets into a list
 data_list <- list(
   ic2004ay, ic2005ay, ic2006ay, ic2007ay,
   ic2008ay, ic2009ay, ic2010ay, ic2011ay,
-  ic2012ay, ic2013ay, ic2014ay)
+  ic2012ay, ic2013ay, ic2014ay
+)
 
-
+# Assign years
 for (i in seq_along(data_list)) {
   data_list[[i]]$year <- years[i]
 }
 
-# Variables needed 
-variables <- c("UNITID","CINSON")
+# Variables needed for total price
+variables <- c(
+  "UNITID",
+  "CHG2AY3",
+  "CHG4AY3",
+  "CHG5AY3",
+  "CHG6AY3"
+)
 
 # Select variables and combine years
 institution_data <- bind_rows(
-  lapply(data_list, function(df) { df %>%
+  lapply(data_list, function(df) {
+    df %>%
       select(year, any_of(variables)) %>%
       mutate(
         across(
           -year,
-          ~ suppressWarnings(as.numeric(as.character(.)))))}))
+          ~ suppressWarnings(as.numeric(as.character(.)))
+        )
+      )
+  })
+)
 
-# Check results
-str(institution_data)
-
-#View(institution_data)
-
-# Filter the 35 institutions
+# Filter the 35 institutions and calculate total price
 institution_35 <- institution_data %>%
   filter(UNITID %in% unitids) %>%
+  mutate(
+    across(
+      c(CHG2AY3, CHG4AY3, CHG5AY3, CHG6AY3),
+      ~ if_else(.x >= 0, .x, NA_real_)
+    ),
+    
+    Total_Price = CHG2AY3 + CHG4AY3 + CHG5AY3 + CHG6AY3
+  ) %>%
   arrange(UNITID, year)
 
 # Check results
-n_distinct(institution_35$UNITID)
-
-# View dataframe
+str(institution_35)
+dim(institution_35)
+summary(institution_35)
 #View(institution_35)
 
-institution_35 <- institution_35 %>%
-  mutate(
-    Total_Price = CINSON
-  )
-
-#View(institution_35)
-
-GMU_avg_Total_price <-  institution_35 %>%
+GMU_Total_Price <- institution_35 %>%
   filter(
     UNITID == 232186,
-    year >= 2004,
-    year <= 2006
+    year %in% 2004:2006
   ) %>%
-  summarise(
-    Average_Total_Price = mean(
-      Total_Price,
-      na.rm = TRUE
-    )
+  select(
+    UNITID,
+    year,
+    CHG2AY3,
+    CHG4AY3,
+    CHG5AY3,
+    CHG6AY3,
+    Total_Price
   )
 
-print(GMU_avg_Total_price)
+print(GMU_Total_Price)
+
+GMU_avg_Total_Price <- GMU_Total_Price %>%
+  summarise(
+    Average_Tuition = mean(CHG2AY3),
+    Average_Books_Supplies = mean(CHG4AY3),
+    Average_Room_Board = mean(CHG5AY3),
+    Average_Other_Expenses = mean(CHG6AY3),
+    Average_Total_Price = mean(Total_Price)
+  )
+
+print(GMU_avg_Total_Price)
 
 
 
@@ -810,12 +825,6 @@ institution_lookup <- tibble(
 # STEP 1: Verify the corrected URM dataset
 # --------------------------------------------------
 
-stopifnot(
-  nrow(ef_35_urm) == 385,
-  all(ef_35_urm$EFALEVEL == 4),
-  !anyDuplicated(ef_35_urm[c("UNITID", "year")])
-)
-
 # Check missing racial enrollment outcomes
 colSums(is.na(
   ef_35_urm %>%
@@ -979,21 +988,121 @@ final_data <- cleaned_data %>%
 # --------------------------------------------------
 # STEP 7: Verify final_data
 # --------------------------------------------------
+library(dplyr)
+library(tidyr)
+library(readxl)
 
-str(final_data)
-dim(final_data)
-summary(final_data)
+# STEP 1: Create a balanced panel dataset
 
-#View(final_data)
 cleaned_data <- expand_grid(
   UNITID = unitids,
   year = 2004:2014
 )
 
-# Import Pell recipient data
-master_OPEID <- read_xlsx("/Users/RekaFujii4/Desktop/Replication Presentation/Pell_Recipients_35_Universities_2004_2014_corrected_names.xlsx")
 
-# Select necessary variables
+# STEP 2: Merge all datasets
+
+cleaned_data <- cleaned_data %>%
+  left_join(
+    admissions_35,
+    by = c("UNITID", "year")
+  ) %>%
+  left_join(
+    institution_35,
+    by = c("UNITID", "year")
+  ) %>%
+  left_join(
+    ef_35_urm,
+    by = c("UNITID", "year")
+  ) %>%
+  left_join(
+    first_year_35,
+    by = c("UNITID", "year")
+  ) %>%
+  left_join(
+    finance_35,
+    by = c("UNITID", "year")
+  ) %>%
+  left_join(
+    efia_35,
+    by = c("UNITID", "year")
+  ) %>%
+  left_join(
+    ftenrollment_35,
+    by = c("UNITID", "year")
+  ) %>%
+  left_join(
+    instgrant_35,
+    by = c("UNITID", "year")
+  ) %>%
+  arrange(UNITID, year)
+
+
+# STEP 3: Calculate additional predictor variables
+
+cleaned_data <- cleaned_data %>%
+  mutate(
+    pct_admitted = if_else(
+      APPLCN > 0,
+      ADMSSN / APPLCN,
+      NA_real_
+    ),
+    
+    pct_yield = if_else(
+      ADMSSN > 0,
+      (ENRLFT + ENRLPT) / ADMSSN,
+      NA_real_
+    ),
+    
+    state_appropriations_per_fte = if_else(
+      Ftenrollment > 0 & state_appropriations >= 0,
+      state_appropriations / Ftenrollment,
+      NA_real_
+    )
+  )
+
+
+# STEP 4: Create final_data
+
+final_data <- cleaned_data %>%
+  select(-any_of(c("institution", "institution_name"))) %>%
+  left_join(
+    institution_lookup,
+    by = "UNITID"
+  ) %>%
+  transmute(
+    institution = institution_name,
+    UNITID,
+    year,
+    Ftenrollment,
+    applications = APPLCN,
+    admitted = pct_admitted,
+    yield = pct_yield,
+    appropriations = state_appropriations,
+    
+    `appropriations per FTE` =
+      state_appropriations_per_fte,
+    
+    `appropriations by 1000` =
+      state_appropriations / 1000,
+    
+    price = Total_Price,
+    SAT,
+    `avg. instgrant`,
+    firstyearclass = first_year_cohort,
+    perhisp = hispanic_share,
+    perblack = black_share,
+    perums = urm_share
+  ) %>%
+  arrange(UNITID, year)
+
+
+# STEP 5: Import Pell recipient data
+
+master_OPEID <- read_xlsx(
+  "/Users/RekaFujii4/Desktop/Replication Presentation/Pell_Recipients_35_Universities_2004_2014_corrected_names.xlsx"
+)
+
 pell_recipients <- master_OPEID %>%
   transmute(
     institution = University,
@@ -1001,8 +1110,14 @@ pell_recipients <- master_OPEID %>%
     recipients = as.numeric(Recipients)
   )
 
+# Check for duplicate observations
+stopifnot(
+  !anyDuplicated(pell_recipients[c("institution", "year")])
+)
 
-# Add Pell recipients and calculate Pell share
+
+# STEP 6: Add Pell recipients and Pell share
+
 final_data <- final_data %>%
   select(-any_of(c("pell", "recipients"))) %>%
   left_join(
@@ -1019,143 +1134,26 @@ final_data <- final_data %>%
   relocate(pell, recipients, .after = year) %>%
   arrange(UNITID, year)
 
-# Check results
-str(final_data)
-dim(final_data)
-summary(final_data)
 
-GMU_avg_Pell <- final_data %>%
-  filter(
-    UNITID == 232186,
-    year %in% 2004:2006
-  ) %>%
-  summarise(
-    Average_Pell = mean(pell)
-  )
-
-print(GMU_avg_Pell)
-
-
-cleaned_data <- cleaned_data %>%
-  
-  left_join(
-    admissions_35,
-    by = c("UNITID", "year")
-  ) %>%
-  
-  left_join(
-    institution_35,
-    by = c("UNITID", "year")
-  ) %>%
-  
-  left_join(
-    ef_35_urm,
-    by = c("UNITID", "year")
-  ) %>%
-  
-  left_join(
-    first_year_35,
-    by = c("UNITID", "year")
-  ) %>%
-  
-  left_join(
-    finance_35,
-    by = c("UNITID", "year")
-  ) %>%
-  
-  left_join(
-    efia_35,
-    by = c("UNITID", "year")
-  ) %>%
-  
-  left_join(
-    ftenrollment_35,
-    by = c("UNITID", "year")
-  ) %>%
-  
-  # NEW: Institutional grant aid
-  left_join(
-    instgrant_35,
-    by = c("UNITID", "year")
-  ) %>%
-  
-  arrange(UNITID, year)
-
-# Verify the merged dataset
-str(cleaned_data)
-dim(cleaned_data)
-summary(cleaned_data)
-
-cleaned_data <- cleaned_data %>%
-  mutate(
-    
-    # Admission rate
-    pct_admitted = if_else(
-      APPLCN > 0,
-      ADMSSN / APPLCN,
-      NA_real_
-    ),
-    
-    # Yield rate
-    pct_yield = if_else(
-      ADMSSN > 0,
-      (ENRLFT + ENRLPT) / ADMSSN,
-      NA_real_
-    ),
-    
-    # State appropriations per full-time student
-    state_appropriations_per_fte = if_else(
-      Ftenrollment > 0 & state_appropriations >= 0,
-      state_appropriations / Ftenrollment,
-      NA_real_
-    )
-  )
-
-final_data <- cleaned_data %>%
-  select(-any_of(c("institution", "institution_name"))) %>%
-  left_join(
-    institution_lookup,
-    by = "UNITID"
-  ) %>%
-  transmute(
-    institution = institution_name,
-    UNITID,
-    year,
-    
-    # Predictor variables
-    Ftenrollment,
-    applications = APPLCN,
-    admitted = pct_admitted,
-    yield = pct_yield,
-    appropriations = state_appropriations,
-    
-    `appropriations per FTE` =
-      state_appropriations_per_fte,
-    
-    `appropriations by 1000` =
-      state_appropriations / 1000,
-    
-    price = Total_Price,
-    SAT,
-    
-    # NEW: Institutional grant aid
-    `avg. instgrant`,
-    
-    firstyearclass = first_year_cohort,
-    
-    # Outcome variables
-    perhisp = hispanic_share,
-    perblack = black_share,
-    perums = urm_share
-    
-  ) %>%
-  arrange(UNITID, year)
+# STEP 7: Verify final_data
 
 str(final_data)
 dim(final_data)
+names(final_data)
 summary(final_data)
 
-# Export the final cleaned dataset
+stopifnot(
+  nrow(final_data) == 385,
+  n_distinct(final_data$UNITID) == 35,
+  !anyDuplicated(final_data[c("UNITID", "year")]),
+  all(c("pell", "recipients") %in% names(final_data))
+)
+
+#View(final_data)
+
+
+# STEP 8: Export the final cleaned dataset
+
 write.csv(
   final_data,
   file = "/Users/RekaFujii4/Desktop/Replication Presentation/cleaned_data.csv",

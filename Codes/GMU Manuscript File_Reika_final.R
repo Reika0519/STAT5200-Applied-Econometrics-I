@@ -301,6 +301,125 @@ path.plot(synth.res = synth.out,
 
 dev.off()	
 
+###################Figure R
+scm_ggplot <- function(dataprep.out,
+                       synth.out,
+                       actual_name = "University of Rhode Island",
+                       synthetic_name = "Synthetic URI",
+                       ylab,
+                       percentage = TRUE) {
+  # Extract actual and synthetic outcomes
+  Ydata <- data.frame(
+    year = as.numeric(rownames(dataprep.out$Y1plot)),
+    Actual = as.numeric(dataprep.out$Y1plot),
+    Synthetic = as.numeric(
+      dataprep.out$Y0plot %*% synth.out$solution.w
+    )
+  )
+  
+  # Convert to long format
+  Ydata_long <- Ydata %>%
+    pivot_longer(
+      cols = c(Actual, Synthetic),
+      names_to = "Institution",
+      values_to = "Outcome"
+    )
+  
+  # Create plot
+  p <- ggplot(
+    Ydata_long,
+    aes(x = year, y = Outcome,
+        color = Institution,
+        linetype = Institution)
+  ) +
+    geom_line(linewidth = 1) +
+    
+    # Policy implementation
+    geom_vline(
+      xintercept = 2007,
+      color = "darkgreen",
+      linetype = "dotted",
+      linewidth = 0.8
+    ) +
+    
+    scale_color_manual(
+      values = c(
+        "Actual" = "magenta4",
+        "Synthetic" = "gray40"
+      ),
+      breaks = c("Actual", "Synthetic"),
+      labels = c(actual_name, synthetic_name)
+    ) +
+    
+    scale_linetype_manual(
+      values = c(
+        "Actual" = "solid",
+        "Synthetic" = "dashed"
+      ),
+      breaks = c("Actual", "Synthetic"),
+      labels = c(actual_name, synthetic_name)
+    ) +
+    
+    scale_x_continuous(
+      breaks = seq(
+        min(Ydata$year),
+        max(Ydata$year),
+        by = 1
+      )
+    ) +
+    
+    labs(
+      x = "Year",
+      y = ylab,
+      color = NULL,
+      linetype = NULL
+    ) +
+    
+    theme_classic(base_size = 13) +
+    
+    theme(
+      text = element_text(family = "serif"),
+      legend.position = "top",
+      legend.background = element_rect(
+        fill = "white",
+        color = "black"
+      ),
+      legend.key.width = grid::unit(1.2, "cm"),
+      axis.text = element_text(color = "black"),
+      panel.border = element_rect(
+        color = "black",
+        fill = NA,
+        linewidth = 0.5
+      )
+    )
+  
+  if (percentage) {
+    p <- p +
+      scale_y_continuous(
+        breaks = seq(0, 0.40, by = 0.05),
+        labels = scales::label_percent(accuracy = 1)
+      ) +
+      coord_cartesian(ylim = c(0, 0.40))
+  } else {
+    p <- p +
+      scale_y_continuous(
+        labels = scales::label_dollar()
+      )
+  }
+  
+  return(p)
+}
+p_pell_placebo <- scm_ggplot(
+  dataprep.out,
+  synth.out,
+  ylab = "% Pell Students Enrolled"
+)
+
+print(p_pell_placebo)
+
+
+
+
 ####################################################################
 ######## PerUms Enrollment
 dataprep.out <-
